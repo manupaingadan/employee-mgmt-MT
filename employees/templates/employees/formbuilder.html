@@ -1,0 +1,108 @@
+<link rel="stylesheet" href="/static/employees/css/style.css">
+
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Dynamic Form Builder</title>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+  <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+  <style>
+    .field-item { padding:10px; border:1px solid #ddd; margin-bottom:8px; background:#fafafa; }
+    .field-controls { float:right; }
+  </style>
+</head>
+<body>
+  <div class="container form-box">
+  <h1>Create Dynamic Form</h1>
+
+  <div>
+    <label>Form name: <input id="form-name" /></label><br>
+    <label>Desc: <input id="form-desc" /></label>
+  </div>
+
+  <h3>Fields</h3>
+  <div id="fields-list">
+    <!-- dynamic fields appear here -->
+  </div>
+
+  <button id="add-field">Add Field</button>
+  <button id="save-form">Save Form (AJAX)</button>
+
+  <script>
+    // helper to create a new field UI
+    function newFieldHtml(idx, field) {
+      field = field || {label:'', type:'text', key:'', required:false};
+      return `<div class="field-item" data-index="${idx}">
+        <div>
+          <label>Label: <input class="f-label" value="${field.label}"/></label>
+          <label>Key: <input class="f-key" value="${field.key}"/></label>
+          <label>Type:
+            <select class="f-type">
+              <option ${field.type=='text'?'selected':''} value="text">Text</option>
+              <option ${field.type=='number'?'selected':''} value="number">Number</option>
+              <option ${field.type=='date'?'selected':''} value="date">Date</option>
+              <option ${field.type=='password'?'selected':''} value="password">Password</option>
+            </select>
+          </label>
+          <label>Required: <input type="checkbox" class="f-required" ${field.required?'checked':''}/></label>
+          <button class="remove-field">Remove</button>
+        </div>
+      </div>`;
+    }
+
+    let idx = 0;
+    $('#add-field').on('click', function(){
+      $('#fields-list').append(newFieldHtml(idx++));
+    });
+
+    // remove
+    $(document).on('click', '.remove-field', function(){
+      $(this).closest('.field-item').remove();
+    });
+
+    // make list sortable (drag-and-drop)
+    $('#fields-list').sortable();
+
+    function collectFields() {
+      const arr = [];
+      $('#fields-list .field-item').each(function(){
+        const label = $(this).find('.f-label').val();
+        const key = $(this).find('.f-key').val();
+        const type = $(this).find('.f-type').val();
+        const required = $(this).find('.f-required').is(':checked');
+        if(!key) return; // skip fields without key
+        arr.push({label, key, type, required});
+      });
+      return arr;
+    }
+
+    $('#save-form').on('click', function(){
+      const name = $('#form-name').val();
+      const desc = $('#form-desc').val();
+      const fields = collectFields();
+      if(!name) return alert('provide form name');
+
+      const payload = {name, description: desc, fields_json: fields};
+
+      // get JWT from localStorage (you should login first and store token)
+      const token = localStorage.getItem('access_token');
+      $.ajax({
+        url: '/api/forms/',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(payload),
+        headers: { 'Authorization': `Bearer ${token}` },
+        success: function(res){
+          alert('Form saved: ' + res.name);
+        },
+        error: function(xhr){
+          alert('Error: ' + xhr.responseText);
+        }
+      });
+    });
+  </script>
+  </div>
+</body>
+</html>

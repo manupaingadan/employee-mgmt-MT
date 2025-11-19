@@ -1,0 +1,56 @@
+<link rel="stylesheet" href="/static/employees/css/style.css">
+
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Login</title>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+<div class="container form-box">
+<h2>Login</h2>
+
+<form id="login-form">
+  <label>Username:</label>
+  <input id="username" /><br><br>
+
+  <label>Password:</label>
+  <input id="password" type="password" /><br><br>
+
+  <button type="submit">Login</button>
+</form>
+
+<p id="msg"></p>
+
+<script>
+$("#login-form").on("submit", function(e) {
+    e.preventDefault();
+
+    $.ajax({
+        url: "/api/auth/token/",
+        method: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({
+            username: $("#username").val(),
+            password: $("#password").val()
+        }),
+        success: function(res) {
+            // Save tokens in browser for next requests
+            localStorage.setItem("access_token", res.access);
+            localStorage.setItem("refresh_token", res.refresh);
+
+            $("#msg").text("Login successful!");
+
+            // Redirect to form builder or employee page
+            window.location.href = "/formbuilder";
+        },
+        error: function(xhr) {
+            $("#msg").text("Invalid credentials!");
+        }
+    });
+});
+</script>
+</div>
+</body>
+</html>

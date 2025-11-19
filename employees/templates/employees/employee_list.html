@@ -1,0 +1,229 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Employee Records</title>
+  <link rel="stylesheet" href="/static/employees/css/style.css">
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <style>
+    /* small tweaks for this page */
+    .filter-row { display:flex; gap:10px; align-items:center; margin-bottom:12px; }
+    .small-btn { padding:6px 10px; font-size:13px; }
+    .muted { color:#666; font-size:13px; }
+    .json-preview { font-family: monospace; font-size:13px; color:#444; white-space:pre-wrap; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Employees</h2>
+
+    <div class="card">
+      <div class="filter-row">
+        <label class="muted">Filter by label:</label>
+        <select id="label-select">
+          <option value="">-- Select field label --</option>
+        </select>
+
+        <input id="filter-value" placeholder="Enter value to search" />
+        <button id="do-filter" class="small-btn">Search</button>
+        <button id="clear-filter" class="small-btn btn-danger">Clear</button>
+        <div style="margin-left:auto">
+          <button id="reload" class="small-btn">Reload</button>
+        </div>
+      </div>
+
+      <div id="summary" class="muted">Loading...</div>
+    </div>
+
+    <table id="employees-table">
+      <thead>
+        <tr><th>ID</th><th>Form</th><th>Preview (data)</th><th>Created At</th><th>Actions</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+<script>
+const token = localStorage.getItem("access_token");
+
+// We'll cache forms to map label -> key
+let formsCache = [];  // array of form objects
+let labelToKeys = {}; // label -> [{form_id, key}] (a label may appear in multiple forms)
+
+function showMsg(txt) { $('#summary').text(txt); }
+
+function loadFormsForLabels() {
+  return $.ajax({
+    url: '/api/forms/',
+    headers: {'Authorization': 'Bearer ' + token},
+    method: 'GET'
+  }).done(function(forms){
+    formsCache = forms;
+    labelToKeys = {};
+    // build dropdown of unique labels
+    const $sel = $('#label-select').empty().append('<option value="">-- Select field label --</option>');
+    const seen = new Set();
+    forms.forEach(f => {
+      (f.fields_json || []).forEach(field => {
+        const label = field.label || field.key;
+        // store possible mappings (label -> key + form)
+        if(!labelToKeys[label]) labelToKeys[label] = [];
+        labelToKeys[label].push({form_id: f.id, key: field.key});
+        if(!seen.has(label)) {
+          seen.add(label);
+          $sel.append(`<option value="${label}">${label}</option>`);
+        }
+      });
+    });
+    showMsg('Loaded ' + forms.length + ' form(s).');
+  }).fail(function(xhr){
+    showMsg('Failed to load forms. Check auth token.');
+  });
+}
+
+function renderEmployees(rows) {
+  const $body = $('#employees-table tbody').empty();
+  if(!rows || rows.length === 0) {
+    $body.append('<tr><td colspan="5">No records found</td></tr>');
+    return;
+  }
+  rows.forEach(r => {
+    const created = new Date(r.created_at).toLocaleString();
+    // create a short preview from data (show top keys)
+    let preview = '';
+    try {
+      const keys = Object.keys(r.data || {});
+      preview = keys.slice(0,4).map(k => `${k}: ${r.data[k]}`).join(' | ');
+      if(keys.length > 4) preview += ' ...';
+    } catch(e) { preview = JSON.stringify(r.data); }
+    const tr = `<tr data-id="${r.id}">
+      <td>${r.id}</td>
+      <td>${r.form || '-'}</td>
+      <td class="json-preview">${escapeHtml(preview)}</td>
+      <td>${created}</td>
+      <td>
+        <button class="view-full small-btn" data-id="${r.id}">View</button>
+        <button class="delete-record small-btn btn-danger" data-id="${r.id}">Delete</button>
+      </td>
+    </tr>`;
+    $body.append(tr);
+  });
+}
+
+// escape helper
+function escapeHtml(s) { return $('<div>').text(s).html(); }
+
+function loadAllEmployees() {
+  showMsg('Loading employees...');
+  return $.ajax({
+    url: '/api/employees/',
+    method: 'GET',
+    headers: {'Authorization': 'Bearer ' + token}
+  }).done(function(res){
+    renderEmployees(res);
+    showMsg('Loaded ' + res.length + ' employee(s).');
+  }).fail(function(xhr){
+    showMsg('Failed to load employees.');
+  });
+}
+
+// call filter endpoint on backend using key -> value
+function filterByKeyValue(key, value) {
+  showMsg(`Filtering by ${key} = ${value} ...`);
+  return $.ajax({
+    url: `/api/employees/filter/?key=${encodeURIComponent(key)}&value=${encodeURIComponent(value)}`,
+    method: 'GET',
+    headers: {'Authorization': 'Bearer ' + token}
+  }).done(function(res){
+    renderEmployees(res);
+    showMsg('Found ' + res.length + ' matching record(s).');
+  }).fail(function(xhr){
+    showMsg('Filter failed.');
+  });
+}
+
+$(document).ready(function(){
+  // initial loads
+  $.when(loadFormsForLabels(), loadAllEmployees()).then(() => showMsg('Ready'));
+
+  // search handler
+  $('#do-filter').on('click', function(){
+    const label = $('#label-select').val();
+    const value = $('#filter-value').val().trim();
+    if(!label) { alert('Choose a label to filter by'); return; }
+    if(!value) { alert('Enter a value to filter'); return; }
+    // pick mapping: if multiple keys exist for same label across different forms,
+    // we will search using each key and merge results (client-side dedupe).
+    const mappings = labelToKeys[label] || [];
+    if(mappings.length === 0) { alert('No matching field key found'); return; }
+
+    // If single mapping, just call API filter once
+    if(mappings.length === 1) {
+      return filterByKeyValue(mappings[0].key, value);
+    }
+
+    // multiple mappings: parallel fetch per key and merge
+    showMsg('Searching across multiple forms...');
+    const requests = mappings.map(m => $.ajax({
+      url: `/api/employees/filter/?key=${encodeURIComponent(m.key)}&value=${encodeURIComponent(value)}`,
+      method: 'GET',
+      headers: {'Authorization': 'Bearer ' + token}
+    }));
+
+    $.when.apply($, requests).done(function(){
+      // jQuery returns arguments differently when multiple requests; normalize
+      const results = [];
+      for(let i = 0; i < arguments.length; i++) {
+        const data = arguments[i][0]; // first element is response body
+        data.forEach(it => results.push(it));
+      }
+      // dedupe by id
+      const dedupe = {};
+      results.forEach(r => dedupe[r.id] = r);
+      const merged = Object.values(dedupe);
+      renderEmployees(merged);
+      showMsg('Found ' + merged.length + ' matching record(s) across forms.');
+    }).fail(function(){ showMsg('Multi-query search failed.'); });
+  });
+
+  $('#clear-filter').on('click', function(){
+    $('#label-select').val('');
+    $('#filter-value').val('');
+    loadAllEmployees();
+  });
+
+  $('#reload').on('click', function(){ loadFormsForLabels(); loadAllEmployees(); });
+
+  // delete handler (delegated)
+  $(document).on('click', '.delete-record', function(){
+    const id = $(this).data('id');
+    if(!confirm('Delete employee #' + id + ' ? This cannot be undone.')) return;
+    $.ajax({
+      url: `/api/employees/${id}/`,
+      method: 'DELETE',
+      headers: {'Authorization': 'Bearer ' + token}
+    }).done(function(){
+      showMsg('Deleted ' + id);
+      $(`tr[data-id="${id}"]`).remove();
+    }).fail(function(xhr){
+      alert('Delete failed');
+    });
+  });
+
+  // view full JSON in alert (or you can implement a modal)
+  $(document).on('click', '.view-full', function(){
+    const id = $(this).data('id');
+    $.ajax({
+      url: `/api/employees/${id}/`,
+      headers: {'Authorization': 'Bearer ' + token},
+      method: 'GET'
+    }).done(function(res){
+      // show pretty JSON in a new window/tab
+      const win = window.open('', '_blank');
+      win.document.write(`<pre>${escapeHtml(JSON.stringify(res.data, null, 2))}</pre>`);
+    });
+  });
+});
+</script>
+</body>
+</html>

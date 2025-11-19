@@ -1,0 +1,83 @@
+<link rel="stylesheet" href="/static/employees/css/style.css">
+
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Create Employee</title>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+  <div class="container form-box">
+  <h1>Create Employee</h1>
+  <label>Pick form:
+    <select id="form-select"></select>
+  </label>
+  <div id="dynamic-form-area"></div>
+  <button id="submit-employee">Save Employee</button>
+
+  <script>
+    const token = localStorage.getItem('access_token');
+    function loadForms(){
+      $.ajax({
+        url: '/api/forms/',
+        headers: {'Authorization': `Bearer ${token}`},
+        success: function(res){
+          $('#form-select').empty();
+          res.forEach(f => $('#form-select').append(`<option value="${f.id}">${f.name}</option>`));
+          if(res.length) loadFormFields(res[0]);
+        }
+      });
+    }
+
+    function loadFormFields(form) {
+      const id = form.id;
+      $('#dynamic-form-area').empty();
+      form.fields_json.forEach(field => {
+        const inputName = `fd_${field.key}`;
+        let inputHtml = `<div><label>${field.label}: `;
+        if(field.type === 'text' || field.type === 'password' || field.type==='date' || field.type==='number') {
+          inputHtml += `<input name="${field.key}" type="${field.type}" ${field.required ? 'required':''}/>`;
+        }
+        inputHtml += `</label></div>`;
+        $('#dynamic-form-area').append(inputHtml);
+      });
+    }
+
+    $('#form-select').on('change', function(){
+      const selected = $(this).val();
+      // fetch selected form details
+      $.ajax({
+        url: `/api/forms/${selected}/`,
+        headers: {'Authorization': `Bearer ${token}`},
+        success: function(form){ loadFormFields(form); }
+      });
+    });
+
+    $('#submit-employee').on('click', function(){
+      const selected = $('#form-select').val();
+      const payload = {form: selected, data: {}};
+      $('#dynamic-form-area').find('input').each(function(){
+        const name = $(this).attr('name');
+        const val = $(this).val();
+        payload.data[name] = val;
+      });
+
+      $.ajax({
+        url: '/api/employees/',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(payload),
+        headers: {'Authorization': `Bearer ${token}`},
+        success: function(){
+          alert('Employee saved');
+        },
+        error: function(xhr){ alert('Error: ' + xhr.responseText); }
+      });
+    });
+
+    loadForms();
+  </script>
+  </div>
+</body>
+</html>
